@@ -27,13 +27,15 @@ class Deck
     cards.shift(num_cards)
   end
 
-  # def to_s
-  #   cards.map do |card|
-  #     card
-  #   end
-  # end
+  def sort
+    cards.sort! { |first, second| second <=> first }
+  end
 
   def shuffle
     cards.shuffle!(random: Random.new)
+  end
+
+  def display
+    cards.map!(&:to_s)
   end
 end

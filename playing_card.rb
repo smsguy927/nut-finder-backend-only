@@ -1,4 +1,7 @@
+# frozen_string_literal: true
+
 class PlayingCard
+  include Comparable
   attr_reader :rank_id, :rank, :suit
 
   def initialize(obj)
@@ -7,7 +10,17 @@ class PlayingCard
     @suit = obj[:suit]
   end
 
+  def broadway_card?
+    rank.to_i == rank_id
+  end
+
   def to_s
     "#{rank}#{suit}"
+  end
+
+  def <=>(other)
+    return rank_id <=> other.rank_id if rank_id != other.rank_id 
+
+    suit <=> other.suit
   end
 end
