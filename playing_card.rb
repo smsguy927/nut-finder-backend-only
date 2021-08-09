@@ -11,7 +11,8 @@ class PlayingCard
   end
 
   def broadway_card?
-    rank.to_i == rank_id
+    broadway_ranks = %w[A K Q J T]
+    broadway_ranks.include?(rank)
   end
 
   def to_s
