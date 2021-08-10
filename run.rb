@@ -7,7 +7,7 @@ my_deck = Deck.new
 my_deck.shuffle
 my_board = Board.new
 # my_board.make_board(my_deck)
-my_board.make_board_with(%w[as kh qd tc 7s])
+my_board.make_board_with(%w[As ks qs Js 4s])
 puts 'Board: '
 puts my_board.display
 puts 'Flush Suit: '
