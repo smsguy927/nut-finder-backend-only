@@ -4,25 +4,73 @@ require_relative './deck'
 
 class Board
   attr_reader :cards, :sorted_cards, :nut_combos, :nut_board, :one_card_nuts, :flush_suit, :rank_counts, :pair_type,
-              :sf_type, :sf_pair_type, :sf_blocker_ranks, :straight_type
+              :nut_type, :sf_type, :sf_special_type, :sf_alt_nuts, :sf_blocker_ranks, :straight_type
 
   BOARD_SIZE = 5
   QUADS_COUNTS_SIZE = 2
   QUADS_COUNT = 4
   PAIR_COUNT = 2
+  TRIPS_COUNT = 3
+  FIRST_CARD_INDEX = 0
+  SECOND_CARD_INDEX = 1
+  MIDDLE_CARD_INDEX = 2
+  FOURTH_CARD_INDEX = 3
+  LAST_CARD_INDEX = 4
   ONE_CARD_NUT_SF_COUNT = 4
   MAX_GAPS_SF_STRAIGHT = 2
   MAX_GAPS_ONE_CARD_SF = 2
   MIN_RANKS_SF_STRAIGHT = 3
 
   SF_TYPES = {
+    NOT_A_SF: -1,
     ZERO_GAPS: 0,
     ONE_GAP: 1,
     TWO_GAPS: 2,
     RF_STEEL: 3,
     ONE_CARD: 4,
     ONE_CARD_SW: 5,
-    STEEL_WHEEL: 6
+    STEEL_WHEEL: 6,
+    ROYAL_FLUSH: 7,
+    KQJ: 8,
+    FOUR_THREE_TWO: 9
+  }.freeze
+
+  NUT_TYPES = {
+    NUT_BOARD: 0,
+    ONE_CARD: 1,
+    STRAIGHT_FLUSH: 2,
+    QUADS_FULL_HOUSE: 3,
+    FLUSH: 4,
+    STRAIGHT: 5,
+    SET: 6
+  }.freeze
+
+  PAIR_TYPES = {
+    NO_PAIR: -1,
+    PAIR_FIRST_CARD: 0,
+    PAIR_SECOND_CARD: 2,
+    PAIR_THIRD_CARD: 3,
+    PAIR_FOURTH_CARD: 4,
+    TWO_PAIR_KICK_FIRST: 5,
+    TWO_PAIR_KICK_SECOND: 6,
+    TWO_PAIR_KICK_THIRD: 7,
+    TRIPS_FIRST_CARD: 8,
+    TRIPS_SECOND_CARD: 9,
+    TRIPS_THIRD_CARD: 10,
+    TRIPS_FOURTH_CARD: 11,
+    FULL_HOUSE_TRIPS_HIGH: 12,
+    FULL_HOUSE_TRIPS_LOW: 13,
+    QUADS: 14,
+    QUAD_ACES: 15
+  }.freeze
+
+  SF_SPECIAL_TYPES = {
+    NONE: -1,
+    TRIPS: 0,
+    TOP_PAIRED_NEXT_GAP: 1,
+    PAIR_IN_GAP: 2,
+    FIVES_ON_432: 3,
+    TENS_ON_KQJ: 4
   }.freeze
 
   RANKS = %w[A K Q J T 9 8 7 6 5 4 3 2].freeze
@@ -143,27 +191,27 @@ class Board
   def set_sf_types
     return if flush_suit.nil?
 
-    set_sf_pair_type if board_paired?
     set_sf_type
+    if sf_type >= SF_TYPES[:ONE_GAP]
+      set_sf_alt_nuts
+    end
   end
 
   def board_paired?
     @rank_counts.any? { |rank| rank[1] >= PAIR_COUNT }
   end
 
-  def set_sf_pair_type
-    # TODO
-  end
-
   def three_consecutive_sf_cards?(sf_ranks)
     i = 0
-    i += 1 while sf_ranks[i] == 'A' || sf_ranks[i] == 'K'
+    i += 1 while sf_ranks[i] == 'A'
     current_rank = sf_ranks[i]
     current_ranks_table_index = RANKS.index(current_rank)
     new_sf_ranks = []
     while i < sf_ranks.size
       if current_ranks_table_index == RANKS.index(current_rank)
         new_sf_ranks.push(current_rank)
+        return true if new_sf_ranks.size >= MIN_RANKS_SF_STRAIGHT
+
         current_ranks_table_index += 1
       else
         new_sf_ranks.clear
@@ -186,6 +234,56 @@ class Board
 
   def set_steel_wheel(sf_ranks)
     # code here
+    filtered_ranks = find_wheel_ranks(sf_ranks)
+    if filtered_ranks.size >= MIN_RANKS_SF_STRAIGHT
+      sw_gaps = find_sw_gaps(filtered_ranks)
+      set_sf_blockers(sw_gaps)
+      @sf_type = SF_TYPES[:STEEL_WHEEL]
+    end
+  end
+
+  def find_broadway_ranks(sf_ranks)
+    sf_ranks.filter { |rank| broadway_card?(rank) }
+  end
+
+  def find_rf_gaps(filtered_ranks)
+    rf_ranks = %w[A K Q J T]
+    rf_ranks.filter { |rank| !filtered_ranks.include?(rank) }
+  end
+
+  def set_royal_flush(sf_ranks)
+    filtered_ranks = find_broadway_ranks(sf_ranks)
+    sw_gaps = find_rf_gaps(filtered_ranks)
+    set_sf_blockers(sw_gaps)
+  end
+
+  def find_wheel_ranks(ranks)
+    ranks.filter { |rank| wheel_card?(rank) }
+  end
+
+  def royal_flush?(sf_ranks)
+    return false unless sf_ranks.include?('A')
+
+    broadway_cards = sf_ranks.filter { |rank| broadway_card?(rank) }.size
+    broadway_cards >= MIN_RANKS_SF_STRAIGHT
+  end
+
+  def kqj_straight_flush?(sf_ranks)
+    sf_ranks.include?('K') && sf_ranks.include?('Q') && sf_ranks.include?('J')
+  end
+
+  def four_32_sf?(sf_ranks)
+    sf_ranks.include?('4') && sf_ranks.include?('3') && sf_ranks.include?('2')
+  end
+
+  def set_three_consecutive_sf_type(sf_ranks)
+    if kqj_straight_flush?(sf_ranks)
+      SF_TYPES[:KQJ]
+    elsif four_32_sf?(sf_ranks)
+      SF_TYPES[:FOUR_THREE_TWO]
+    else
+      SF_TYPES[:ZERO_GAPS]
+    end
   end
 
   def set_sf_type
@@ -195,15 +293,19 @@ class Board
     end
     if sf_ranks.size >= ONE_CARD_NUT_SF_COUNT
       set_one_card_sf(sf_ranks)
-      return
+      return unless @sf_type.nil?
     end
     if three_consecutive_sf_cards?(sf_ranks)
-      @sf_type = SF_TYPES[:ZERO_GAPS]
+      @sf_type = set_three_consecutive_sf_type(sf_ranks)
       return
     end
     if royal_flush_steel_wheel?(sf_ranks)
       @sf_type = SF_TYPES[:RF_STEEL]
-      puts 'abcabc'
+      return
+    end
+    if royal_flush?(sf_ranks)
+      @sf_type = SF_TYPES[:ROYAL_FLUSH]
+      set_royal_flush(sf_ranks)
       return
     end
     gaps = 0
@@ -213,6 +315,9 @@ class Board
     sf_blockers = []
     sf_cards = 0
     while i < sf_ranks.size - 1
+      sf_cards += 1
+      break if sf_cards >= MIN_RANKS_SF_STRAIGHT
+
       ranks_left -= 1
       next_rank = sf_ranks[i + 1]
       next_sf_ranks_index = RANKS.index(next_rank)
@@ -228,24 +333,39 @@ class Board
         gaps = 0
         sf_cards = 0
       else
-        sf_cards += 1
+
         add_gaps(sf_blockers, gap_size, ranks_index + 1)
       end
 
       i += 1
       ranks_index = next_sf_ranks_index
       puts gaps
-      break if sf_cards >= MIN_RANKS_SF_STRAIGHT
+
     end
+
     @sf_type = gaps
     set_sf_blockers(sf_blockers)
   end
 
+  def find_sw_gaps(filtered_ranks)
+    sw_ranks = %w[5 4 3 2 A]
+    sw_ranks.filter { |rank| !filtered_ranks.include?(rank) }
+  end
+
   def set_one_card_steel_wheel(sf_ranks)
     # code here
+    filtered_ranks = sf_ranks.filter do |rank|
+      wheel_card?(rank)
+    end
+    if filtered_ranks.size >= ONE_CARD_NUT_SF_COUNT
+      sw_gaps = find_sw_gaps(filtered_ranks)
+      set_sf_blockers(sw_gaps)
+      @sf_type = SF_TYPES[:ONE_CARD_SW]
+    end
   end
 
   def set_one_card_sf(sf_ranks)
+    # TODO: FIX THIS, As Qd 7s 6s 5s is NOT a one card sf!!!
     gaps = 0
     i = 0
     ranks_left = sf_ranks.size
@@ -281,13 +401,17 @@ class Board
     @sf_type = SF_TYPES[:ONE_CARD]
     set_sf_blockers(sf_blockers)
 
-    @one_card_nuts = if sf_blockers.size.positive?
-                       sf_blockers[0]
-                     elsif sf_cards[0] == 'A'
-                       'T'
-                     else
-                       RANKS[RANKS.index(sf_cards[0]) - 1]
-                     end
+    @one_card_nuts = calc_one_card_sf_nuts(sf_blockers, sf_cards)
+  end
+
+  def calc_one_card_sf_nuts(sf_blockers, sf_cards)
+    if sf_blockers.size.positive?
+      sf_blockers[0]
+    elsif sf_cards[0] == 'A'
+      'T'
+    else
+      RANKS[RANKS.index(sf_cards[0]) - 1]
+    end
   end
 
   def add_gaps(sf_blockers, gap_size, ranks_index)
@@ -300,5 +424,47 @@ class Board
 
   def set_sf_blockers(sf_blockers)
     @sf_blocker_ranks = sf_blockers.join
+  end
+
+  ###############################################################################################
+  def set_sf_alt_nuts
+    set_sf_special_type
+  end
+
+  def board_trips?
+    rank_counts.any?{|rank| rank[1] >= TRIPS_COUNT}
+  end
+
+  def top_paired_next_gap?
+    rank_counts[sorted_cards[FIRST_CARD_INDEX].rank] == PAIR_COUNT && sorted_cards[MIDDLE_CARD_INDEX].suit != flush_suit && sorted_cards[FOURTH_CARD_INDEX].suit == flush_suit && sorted_cards[LAST_CARD_INDEX].suit == flush_suit
+  end
+
+  def pair_in_gap?
+    (sorted_cards[FIRST_CARD_INDEX].suit == flush_suit && sorted_cards[LAST_CARD_INDEX].suit == flush_suit && sorted_cards[SECOND_CARD_INDEX].rank == sorted_cards[MIDDLE_CARD_INDEX].rank || sorted_cards[MIDDLE_CARD_INDEX].rank == sorted_cards[FOURTH_CARD_INDEX].rank) || (sorted_cards[FIRST_CARD_INDEX].suit == flush_suit && sorted_cards[SECOND_CARD_INDEX].suit == flush_suit && sorted_cards[MIDDLE_CARD_INDEX].suit == flush_suit && (sorted_cards[FOURTH_CARD_INDEX].rank == 'J' || sorted_cards[FOURTH_CARD_INDEX].rank == 'T') && sorted_cards[FOURTH_CARD_INDEX].rank == sorted_cards[LAST_CARD_INDEX].rank)
+  end
+
+  def fives_on_432?
+    sorted_cards[FIRST_CARD_INDEX].rank == '5' && sorted_cards[SECOND_CARD_INDEX].rank == '5' && sf_type == SF_TYPES[:FOUR_THREE_TWO]
+  end
+
+  def tens_on_kqj?
+    sf_type == SF_TYPES[:KQJ] && sorted_cards[FOURTH_CARD_INDEX].rank == 'T' && sorted_cards[LAST_CARD_INDEX].rank == 'T'
+  end
+
+  def set_sf_special_type
+
+    return unless board_paired?
+
+    if board_trips?
+      @sf_special_type = SF_SPECIAL_TYPES[:TRIPS]
+    elsif top_paired_next_gap?
+      @sf_special_type = SF_SPECIAL_TYPES[:TOP_PAIRED_NEXT_GAP]
+    elsif pair_in_gap?
+      @sf_special_type = SF_SPECIAL_TYPES[:PAIR_IN_GAP]
+    elsif fives_on_432?
+      @sf_special_type = SF_SPECIAL_TYPES[:FIVES_ON_432]
+    elsif tens_on_kqj?
+      @sf_special_type = SF_SPECIAL_TYPES[:TENS_ON_KQJ]
+    end
   end
 end
