@@ -31,13 +31,12 @@ class Board
     ZERO_GAPS: 0,
     ONE_GAP: 1,
     TWO_GAPS: 2,
-    RF_STEEL: 3,
-    ONE_CARD: 4,
-    ONE_CARD_SW: 5,
-    STEEL_WHEEL: 6,
-    ROYAL_FLUSH: 7,
-    KQJ: 8,
-    FOUR_THREE_TWO: 9
+    ONE_CARD: 3,
+    ONE_CARD_SW: 4,
+    STEEL_WHEEL: 5,
+    ROYAL_FLUSH: 6,
+    KQJ: 7,
+    FOUR_THREE_TWO: 8
   }.freeze
 
   NUT_TYPES = {
@@ -156,7 +155,6 @@ class Board
     @nut_board = true if royal_flush_board?
     @nut_board = true if nut_quads_board?
     @nut_board = true if no_flush_broadway_board?
-    puts "Nut Board: #{@nut_board}"
   end
 
   def set_rank_counts
@@ -197,10 +195,12 @@ class Board
     @rank_counts['A'] == 1
   end
 
+  def board_quad_aces?
+    @rank_counts['A'] == QUADS_COUNT
+  end
+
   def board_quad_aces_king?
-    bbb = @rank_counts['A']
-    puts bbb
-    @rank_counts['A'] == QUADS_COUNT && @rank_counts['K'] == 1
+    board_quad_aces? && @rank_counts['K'] == 1
   end
 
   def no_flush_broadway_board?
@@ -227,7 +227,7 @@ class Board
     while i < sf_ranks.size
       if current_ranks_table_index == RANKS.index(current_rank)
         new_sf_ranks.push(current_rank)
-        return true if new_sf_ranks.size >= MIN_RANKS_SF_STRAIGHT
+        break if new_sf_ranks.size >= MIN_RANKS_SF_STRAIGHT
 
         current_ranks_table_index += 1
       else
@@ -238,19 +238,15 @@ class Board
       i += 1
       current_rank = sf_ranks[i]
     end
-    new_sf_ranks.size >= MIN_RANKS_SF_STRAIGHT
+    if new_sf_ranks.size >= MIN_RANKS_SF_STRAIGHT
+      set_sf_straight_ranks(new_sf_ranks)
+      true
+    else
+      false
+    end
   end
-
-  def royal_flush_steel_wheel?(sf_ranks)
-    return false unless sf_ranks.include?('A')
-
-    broadway_cards = sf_ranks.filter { |rank| broadway_card?(rank) }.size
-    wheel_cards = sf_ranks.filter { |rank| wheel_card?(rank) }.size
-    broadway_cards >= MIN_RANKS_SF_STRAIGHT && wheel_cards >= MIN_RANKS_SF_STRAIGHT
-  end
-
+  
   def set_steel_wheel(sf_ranks)
-    # code here
     filtered_ranks = find_wheel_ranks(sf_ranks)
     if filtered_ranks.size >= MIN_RANKS_SF_STRAIGHT
       sw_gaps = find_sw_gaps(filtered_ranks)
@@ -260,7 +256,6 @@ class Board
   end
 
   def set_wheel(board_ranks)
-    # code here
     filtered_ranks = find_wheel_ranks(board_ranks)
     if filtered_ranks.size >= MIN_RANKS_SF_STRAIGHT
       wheel_gaps = find_wheel_gaps(filtered_ranks)
@@ -317,67 +312,87 @@ class Board
     end
   end
 
-  def set_sf_type
-    sf_ranks = []
-    sorted_cards.each do |card|
-      sf_ranks.push(card.rank) if card.suit == flush_suit
+  def calc_gaps(rank, next_rank)
+    (RANKS.index(rank) - RANKS.index(next_rank)).abs - 1
+  end
+
+  def shift_bad_ranks(sf_ranks, blockers, next_rank)
+    i = 0
+    test_rank = sf_ranks[1]
+    while i < sf_ranks.size
+      if calc_gaps(sf_ranks[0], test_rank) > MAX_GAPS_SF_STRAIGHT
+        sf_ranks.shift
+        blockers.shift while !blockers.empty? && RANKS.index(blockers[0]) <= RANKS.index(sf_ranks[0])
+      end
+      i += 1
+      test_rank = i < sf_ranks.size - 1 ? sf_ranks[i + 1] : next_rank
     end
-    if sf_ranks.size >= ONE_CARD_NUT_SF_COUNT
-      set_one_card_sf(sf_ranks)
+  end
+
+  def set_sf_type
+    flush_ranks = []
+    sorted_cards.each do |card|
+      flush_ranks.push(card.rank) if card.suit == flush_suit
+    end
+    if flush_ranks.size >= ONE_CARD_NUT_SF_COUNT
+      set_one_card_sf(flush_ranks)
       return unless @sf_type.nil?
     end
-    if three_consecutive_sf_cards?(sf_ranks)
-      @sf_type = set_three_consecutive_sf_type(sf_ranks)
+    if three_consecutive_sf_cards?(flush_ranks)
+      @sf_type = set_three_consecutive_sf_type(flush_ranks)
       return
     end
-    if royal_flush_steel_wheel?(sf_ranks)
-      @sf_type = SF_TYPES[:RF_STEEL]
-      return
-    end
-    if royal_flush?(sf_ranks)
+    if royal_flush?(flush_ranks)
       @sf_type = SF_TYPES[:ROYAL_FLUSH]
-      set_royal_flush(sf_ranks)
+      set_royal_flush(flush_ranks)
       return
     end
     gaps = 0
     i = 0
-    ranks_left = sf_ranks.size
-    ranks_index = RANKS.index(sf_ranks[0])
+    ranks_left = flush_ranks.size
+    ranks_index = RANKS.index(flush_ranks[0])
     sf_blockers = []
-    sf_cards = 0
-    while i < sf_ranks.size - 1
-      sf_cards += 1
-      break if sf_cards >= MIN_RANKS_SF_STRAIGHT
+    sf_ranks = []
+    while i < flush_ranks.size
+      sf_ranks.push(flush_ranks[i])
+      break if sf_ranks.size >= MIN_RANKS_SF_STRAIGHT
 
       ranks_left -= 1
-      next_rank = sf_ranks[i + 1]
-      next_sf_ranks_index = RANKS.index(next_rank)
-      gap_size = next_sf_ranks_index - 1 - ranks_index
+      next_rank = flush_ranks[i + 1]
+      next_flush_ranks_index = RANKS.index(next_rank).nil? ? 0 : RANKS.index(next_rank)
+      gap_size = next_flush_ranks_index - 1 - ranks_index
       gaps += gap_size
-      if gaps > MAX_GAPS_SF_STRAIGHT && ranks_left < MIN_RANKS_SF_STRAIGHT
-        set_steel_wheel(sf_ranks)
+      if gap_size > MAX_GAPS_SF_STRAIGHT && ranks_left < MIN_RANKS_SF_STRAIGHT
+        set_steel_wheel(flush_ranks)
         return
       end
 
-      if gaps > MAX_GAPS_SF_STRAIGHT
+      if gap_size > MAX_GAPS_SF_STRAIGHT
         sf_blockers.clear
         gaps = 0
-        sf_cards = 0
+        sf_ranks.clear
+      elsif gaps > MAX_GAPS_SF_STRAIGHT
+        shift_bad_ranks(sf_ranks, sf_blockers, next_rank)
+        gaps = gap_size
+        j = 0
+        while j < sf_ranks.size - 1
+          gaps += calc_gaps(sf_ranks[j], sf_ranks[j + 1])
+          j += 1
+        end
+        add_gaps(sf_blockers, gap_size, ranks_index + 1)
       else
-
         add_gaps(sf_blockers, gap_size, ranks_index + 1)
       end
 
       i += 1
-      ranks_index = next_sf_ranks_index
-      puts gaps
-
+      ranks_index = next_flush_ranks_index
     end
 
     @sf_type = gaps
     set_gaps(sf_blockers)
+    set_sf_straight_ranks(sf_ranks)
   end
-  
+
   def filter_broadway_ranks
     sorted_cards.filter(&:broadway_card?).map(&:rank)
   end
@@ -411,29 +426,32 @@ class Board
 
   def set_one_card_sf(sf_ranks)
     # TODO: FIX THIS, As Qd 7s 6s 5s is NOT a one card sf!!!
-    gaps = 0
+    current_gaps = 0
+    total_gaps = 0
     i = 0
     ranks_left = sf_ranks.size
     ranks_index = RANKS.index(sf_ranks[0])
     sf_blockers = []
     sf_cards = []
-    while i < sf_ranks.size - 1
+    while i < sf_ranks.size
       sf_cards.push(sf_ranks[i])
       break if sf_cards.size >= ONE_CARD_NUT_SF_COUNT
+      return if sf_cards.size >= MIN_RANKS_SF_STRAIGHT && total_gaps == 0
 
       ranks_left -= 1
       next_rank = sf_ranks[i + 1]
-      next_sf_ranks_index = RANKS.index(next_rank)
+      next_sf_ranks_index = RANKS.index(next_rank).nil? ? 0 : RANKS.index(next_rank)
       gap_size = next_sf_ranks_index - 1 - ranks_index
-      gaps += gap_size
-      if gaps > MAX_GAPS_ONE_CARD_SF && ranks_left < MIN_RANKS_SF_STRAIGHT
+      current_gaps += gap_size
+      total_gaps += gap_size
+      if current_gaps > MAX_GAPS_ONE_CARD_SF && ranks_left < MIN_RANKS_SF_STRAIGHT
         set_one_card_steel_wheel(sf_ranks)
         return
       end
 
-      if gaps > MAX_GAPS_ONE_CARD_SF
+      if current_gaps > MAX_GAPS_ONE_CARD_SF
         sf_blockers.clear
-        gaps = 0
+        current_gaps = 0
         sf_cards.clear
       else
         add_gaps(sf_blockers, gap_size, ranks_index + 1)
@@ -442,11 +460,11 @@ class Board
       i += 1
       ranks_index = next_sf_ranks_index
     end
-    puts 'tada'
-    @sf_type = SF_TYPES[:ONE_CARD]
-    set_gaps(sf_blockers)
-
-    @one_card_nuts = calc_one_card_sf_nuts(sf_blockers, sf_cards)
+    if sf_cards.size >= ONE_CARD_NUT_SF_COUNT
+      @sf_type = SF_TYPES[:ONE_CARD]
+      set_gaps(sf_blockers)
+      @one_card_nuts = calc_one_card_sf_nuts(sf_blockers, sf_cards)
+    end
   end
 
   def calc_one_card_sf_nuts(sf_blockers, sf_cards)
@@ -488,19 +506,19 @@ class Board
   def top_paired_next_gap?
     top_card_paired? && sf_gap_after_pair? && sorted_cards[FOURTH_CARD_INDEX].suit == flush_suit && sorted_cards[LAST_CARD_INDEX].suit == flush_suit
   end
-  
+
   def top_card_paired?
     rank_counts[sorted_cards[FIRST_CARD_INDEX].rank] == PAIR_COUNT
   end
 
   def filter_pairs
-    sorted_cards.filter{|card| rank_counts[card.rank] == PAIR_COUNT}
+    sorted_cards.filter{ |card| rank_counts[card.rank] == PAIR_COUNT }
   end
 
   def last_card_paired?
     rank_counts[sorted_cards[LAST_CARD_INDEX].rank] == PAIR_COUNT
   end
-  
+
   def sf_gap_after_pair?
     sorted_cards[MIDDLE_CARD_INDEX].suit != flush_suit
   end
@@ -556,8 +574,14 @@ class Board
   end
 
   def find_nut_type
-    if !sf_type.nil?
+    if nut_board
+      NUT_TYPES[:NUT_BOARD]
+    elsif sf_type == SF_TYPES[:ONE_CARD]
+      NUT_TYPES[:ONE_CARD_SF]
+    elsif !sf_type.nil?
       NUT_TYPES[:STRAIGHT_FLUSH]
+    elsif board_quads?
+      NUT_TYPES[:BOARD_QUADS]
     elsif board_trips?
       NUT_TYPES[:ONE_CARD_QUADS]
     elsif board_paired?
@@ -594,13 +618,13 @@ class Board
     ranks_index = RANKS.index(board_ranks[0])
     blockers = []
     straight_ranks = []
-    while i < board_ranks.size - 1
+    while i < board_ranks.size
       straight_ranks.push(board_ranks[i])
       break if straight_ranks.size >= MIN_RANKS_SF_STRAIGHT
 
       ranks_left -= 1
       next_rank = board_ranks[i + 1]
-      next_ranks_index = RANKS.index(next_rank)
+      next_ranks_index = RANKS.index(next_rank).nil? ? 0 : RANKS.index(next_rank)
       gap_size = next_ranks_index - 1 - ranks_index
       gaps += gap_size
       if gaps > MAX_GAPS_SF_STRAIGHT && ranks_left < MIN_RANKS_SF_STRAIGHT
@@ -638,15 +662,68 @@ class Board
   end
 
   def set_nut_board_combos
-    # code here
+    nuts = "#{ANY_RANK}#{ANY_SUIT}#{ANY_RANK}#{ANY_SUIT}"
+    @nut_combos.push(nuts)
   end
 
   def set_one_card_sf_nut_combos
+    nuts = "#{gap_ranks[0]}#{flush_suit}#{SEP}#{ANY_RANK}#{ANY_SUIT}"
+    @nut_combos.push(nuts)
+  end
+
+  def set_zero_gap_sf_nuts
+    nuts = "#{RANKS[RANKS.index(sf_straight_ranks[0]) - 2]}#{flush_suit}#{RANKS[RANKS.index(sf_straight_ranks[0]) - 1]}#{flush_suit}#{SEP}#{RANKS[RANKS.index(sf_straight_ranks[0]) - 1]}#{flush_suit}#{RANKS[RANKS.index(sf_straight_ranks[2]) + 1]}#{flush_suit}"
+    @nut_combos.push(nuts)
+  end
+
+  def set_sf_special_nut_combos
     # code here
   end
 
   def set_sf_nut_combos
-    # code here
+    if sf_special_type.nil?
+      set_sf_reg_nut_combos
+    else
+      set_sf_special_nut_combos
+    end
+  end
+
+  def set_one_gap_sf_nuts
+    nut_flush_rank = find_highest_missing_flush_rank
+    nuts = "#{RANKS[RANKS.index(sf_straight_ranks[0]) - 1]}#{flush_suit}#{gap_ranks[0]}#{flush_suit}#{SEP}#{gap_ranks[0]}#{flush_suit}#{RANKS[RANKS.index(sf_straight_ranks[2]) + 1]}#{flush_suit}#{SEP}#{nut_flush_rank}#{flush_suit}#{gap_ranks[0]}#{flush_suit}"
+    @nut_combos.push(nuts)
+  end
+
+  def set_two_gap_sf_nuts
+    nut_flush_rank = find_highest_missing_flush_rank
+    nuts = "#{gap_ranks[0]}#{flush_suit}#{gap_ranks[1]}#{flush_suit}#{SEP}#{nut_flush_rank}#{flush_suit}#{gap_ranks[0]}#{flush_suit}#{SEP}#{nut_flush_rank}#{flush_suit}#{gap_ranks[1]}#{flush_suit}"
+    @nut_combos.push(nuts)
+  end
+
+  def set_steel_wheel_sf_nuts
+    set_two_gap_sf_nuts
+  end
+
+  def set_royal_flush_nuts
+    nuts = "#{gap_ranks[0]}#{flush_suit}#{gap_ranks[1]}#{flush_suit}#{SEP}#{gap_ranks[0]}#{flush_suit}#{ANY_RANK}#{flush_suit}"
+    @nut_combos.push(nuts)
+  end
+
+  def set_sf_reg_nut_combos
+    case sf_type
+    when SF_TYPES[:ZERO_GAPS]
+      set_zero_gap_sf_nuts
+    when SF_TYPES[:ONE_GAP]
+      set_one_gap_sf_nuts
+    when SF_TYPES[:TWO_GAPS]
+      set_two_gap_sf_nuts
+    when SF_TYPES[:STEEL_WHEEL]
+      set_steel_wheel_sf_nuts
+    when SF_TYPES[:ROYAL_FLUSH]
+      set_royal_flush_nuts
+    else
+      puts "I can't set the sf reg type"
+    end
   end
 
   def set_zero_gap_straight_nuts
@@ -688,7 +765,7 @@ class Board
       set_broadway_straight_nuts
     else
 
-      puts "I don't know"
+      puts "I can't set the straight nut combo"
     end
   end
 
@@ -700,7 +777,7 @@ class Board
 
   def find_highest_missing_flush_rank
     flush_ranks = sorted_cards.filter { |card| card.suit == flush_suit }.map(&:rank)
-    RANKS.find {|rank|!flush_ranks.include?(rank)}
+    RANKS.find { |rank| !flush_ranks.include?(rank) }
   end
 
   def set_flush_nut_combos
@@ -715,8 +792,6 @@ class Board
     @nut_combos.push(nuts)
   end
 
-
-
   def set_quads_fh_nut_combos
     if top_card_paired? && !last_card_paired?
       nuts = "#{sorted_cards[0].rank}#{ANY_SUIT}#{sorted_cards[0].rank}#{ANY_SUIT}#{SEP}#{sorted_cards[0].rank}#{ANY_SUIT}#{sorted_cards[MIDDLE_CARD_INDEX].rank}#{ANY_SUIT}"
@@ -728,7 +803,9 @@ class Board
   end
 
   def set_board_quads_nut_combos
-    # code here
+    rank = board_quad_aces? ? 'K' : 'A'
+    nuts = "#{rank}#{ANY_SUIT}#{ANY_RANK}#{ANY_SUIT}"
+    @nut_combos.push(nuts)
   end
 
   def set_one_card_quads_nut_combos
@@ -738,7 +815,8 @@ class Board
   end
 
   def set_top_fh_nut_combos
-    # code here
+    # Used only during no quads mode
+    set_set_nut_combos
   end
 
   def set_nut_combos
@@ -769,7 +847,7 @@ class Board
     when NUT_TYPES[:SET]
       set_set_nut_combos
     else
-      puts "I don't know"
+      puts "I can't set that nut combo"
     end
   end
 end

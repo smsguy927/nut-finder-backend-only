@@ -7,7 +7,7 @@ my_deck = Deck.new
 my_deck.shuffle
 my_board = Board.new
 # my_board.make_board(my_deck)
-my_board.make_board_with(%w[4s Qd Qc Qh Kc])
+my_board.make_board_with(%w[Ah 5h 2h Kh Jh])
 puts 'Board: '
 puts my_board.display
 puts 'SF Type: '
@@ -18,6 +18,8 @@ puts 'Straight Type: '
 puts Board::STRAIGHT_TYPES.key(my_board.straight_type)
 puts 'Gap Ranks: '
 puts my_board.gap_ranks
+puts 'SF Straight Ranks: '
+puts my_board.sf_straight_ranks
 puts 'Flush Suit: '
 puts my_board.flush_suit
 puts 'Nut Type: '
